@@ -1,15 +1,15 @@
 require('dotenv').config();
 const express = require('express');
+const cors = require('cors');
 const pool = require('./config/db');
 const validarUsuario = require('./validacao/usuarios');
 const validarPost = require('./validacao/post');
 const jwt = require('jsonwebtoken');
 const auth = require('./auth/authLogin');
-const cors = require('cors');
 
 const app = express();
-app.use(express.json());
 app.use(cors());
+app.use(express.json());
 
 function formatarData(data) {
     return new Date(data).toLocaleString('pt-BR', {
@@ -29,12 +29,11 @@ app.post('/usuarios', validarUsuario, async (req, res) => {
         const resultado = await pool.query(
             `INSERT INTO usuarios (nome, email, senha)
              VALUES ($1, $2, $3)
-             RETURNING id, nome, email, criado_em`,
+             RETURNING id, nome, email`,
             [nome, email, senha]
         );
         res.status(201).json({ mensagem: 'Usuário criado com sucesso', usuario: resultado.rows[0] });
     } catch (erro) {
-        // Trata e-mail duplicado (violação de unique)
         if (erro.code === '23505') {
             return res.status(409).json({ erro: 'E-mail já cadastrado' });
         }
@@ -57,7 +56,6 @@ app.post('/login', async (req, res) => {
 
         const usuario = resultado.rows[0];
 
-        // ⚠️  Ideal: substituir por bcrypt.compare(senha, usuario.senha)
         if (senha !== usuario.senha) {
             return res.status(401).json({ erro: 'Credenciais inválidas' });
         }
@@ -75,7 +73,7 @@ app.post('/login', async (req, res) => {
 app.get('/usuarios', async (req, res) => {
     try {
         const resultado = await pool.query(
-            `SELECT id, nome, email FROM usuarios`  // nunca retornar senha
+            `SELECT id, nome, email FROM usuarios`
         );
         res.json(resultado.rows);
     } catch (error) {
@@ -127,16 +125,14 @@ app.post('/post', auth, validarPost, async (req, res) => {
 });
 
 // Atualizar post
-app.put('/post/:id', auth, validarPost, async (req, res) => {  // 🔒 auth adicionado
+app.put('/post/:id', auth, validarPost, async (req, res) => {
     try {
         const { id } = req.params;
         const { titulo, conteudo } = req.body;
 
-        const post = await pool.query(`SELECT * FROM post WHERE id = $1`, [id]);
-
         const resultado = await pool.query(
             `UPDATE post SET titulo = $1, conteudo = $2
-             WHERE id = $3 AND usuario_id = $4              -- só o dono pode editar
+             WHERE id = $3 AND usuario_id = $4
              RETURNING *`,
             [titulo, conteudo, id, req.usuario.id]
         );
@@ -152,12 +148,12 @@ app.put('/post/:id', auth, validarPost, async (req, res) => {  // 🔒 auth adic
 });
 
 // Excluir post
-app.delete('/post/:id', auth, async (req, res) => {  // 🔒 auth adicionado
+app.delete('/post/:id', auth, async (req, res) => {
     try {
         const { id } = req.params;
 
         const resultado = await pool.query(
-            `DELETE FROM post WHERE id = $1 AND usuario_id = $2 RETURNING *`,  // só o dono
+            `DELETE FROM post WHERE id = $1 AND usuario_id = $2 RETURNING *`,
             [id, req.usuario.id]
         );
 
