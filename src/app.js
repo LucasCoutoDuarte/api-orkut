@@ -6,6 +6,7 @@ const validarUsuario = require('./validacao/usuarios');
 const validarPost = require('./validacao/post');
 const jwt = require('jsonwebtoken');
 const auth = require('./auth/authLogin');
+const bcrypt = require('bcrypt');
 
 const app = express();
 app.use(cors());
@@ -26,11 +27,12 @@ app.get('/', (req, res) => {
 app.post('/usuarios', validarUsuario, async (req, res) => {
     try {
         const { nome, email, senha } = req.body;
+        const senhaHash = await bcrypt.hash(senha, 10);
         const resultado = await pool.query(
             `INSERT INTO usuarios (nome, email, senha)
              VALUES ($1, $2, $3)
              RETURNING id, nome, email`,
-            [nome, email, senha]
+            [nome, email, senhaHash]
         );
         res.status(201).json({ mensagem: 'Usuário criado com sucesso', usuario: resultado.rows[0] });
     } catch (erro) {
@@ -51,12 +53,16 @@ app.post('/login', async (req, res) => {
         );
 
         if (resultado.rows.length === 0) {
-            return res.status(401).json({ erro: 'Credenciais inválidas' });
+            return res.status(400).json({ erro: 'Credenciais inválidas' });
         }
 
-        const usuario = resultado.rows[0];
+        const senhaValida = await bcrypt.compare(senha, resultado.rows[0].senha);
 
-        if (senha !== usuario.senha) {
+         if (!senhaValida) {
+            return res.status(400).json({ erro: 'Credenciais inválidas' });
+        }
+
+        if (!await bcrypt.compare(senha, usuario.senha)) {
             return res.status(401).json({ erro: 'Credenciais inválidas' });
         }
 
@@ -130,6 +136,18 @@ app.put('/post/:id', auth, validarPost, async (req, res) => {
         const { id } = req.params;
         const { titulo, conteudo } = req.body;
 
+        const post = await pool.query(
+            `SELECT * FROM post WHERE id = $1`, [id]
+        );
+
+        if (post.rows.length === 0) {
+            return res.status(404).json({ mensagem: 'Post não encontrado' });
+        };
+
+        if (post.rows[0].usuario_id !== req.usuario.id) {
+            return res.status(403).json({ mensagem: 'Sem permissão para atualizar este post' });
+        }
+
         const resultado = await pool.query(
             `UPDATE post SET titulo = $1, conteudo = $2
              WHERE id = $3 AND usuario_id = $4
@@ -156,6 +174,18 @@ app.delete('/post/:id', auth, async (req, res) => {
             `DELETE FROM post WHERE id = $1 AND usuario_id = $2 RETURNING *`,
             [id, req.usuario.id]
         );
+
+        const post = await pool.query(
+            `SELECT * FROM post WHERE id = $`, [id]
+        );
+
+        if (post.rows.length === 0) {
+            return res.status(404).json({ mensagem: 'Post não encontrado' });
+        };
+
+        if (post.rows[0].usuario_id !== req.usuario.id) {
+            return res.status(403).json({ mensagem: 'Sem permissão para atualizar este post' });
+        }
 
         if (resultado.rows.length === 0) {
             return res.status(404).json({ erro: 'Post não encontrado ou sem permissão' });
